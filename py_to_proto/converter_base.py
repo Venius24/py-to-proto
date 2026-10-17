@@ -416,8 +416,33 @@ class ConverterBase(Generic[T], abc.ABC):
         message_name = to_upper_camel(name)
         log.debug("Message name: %s", message_name)
 
+        # Fields that name their own number (rather than taking the next
+        # sequential one) must not be collided with by the sequential ones,
+        # wherever they appear in the message. A field's number is explicit if
+        # it does not depend on the index it is asked for.
+        message_fields = list(message_fields)
+        explicit_numbers = set()
+        for _, field_def in message_fields:
+            for sub_def in [field_def] + [
+                oneof_def for _, oneof_def in self.get_oneof_fields(field_def) or []
+            ]:
+                if self.get_field_number(0, sub_def) == self.get_field_number(
+                    1, sub_def
+                ):
+                    explicit_numbers.add(self.get_field_number(0, sub_def))
+        used_numbers = set()
+
+        def get_unique_field_number(num_fields: int, field_def: Any) -> int:
+            field_number = self.get_field_number(num_fields, field_def)
+            if field_number != self.get_field_number(num_fields + 1, field_def):
+                # Sequentially numbered: skip numbers taken by any other field
+                while field_number in explicit_numbers or field_number in used_numbers:
+                    field_number += 1
+            used_numbers.add(field_number)
+            return field_number
+
         for field_name, field_def in message_fields:
-            field_number = self.get_field_number(len(field_descriptors), field_def)
+            field_number = get_unique_field_number(len(field_descriptors), field_def)
             log.debug2(
                 "Handling field [%s.%s] (%d)",
                 message_name,
@@ -451,7 +476,7 @@ class ConverterBase(Generic[T], abc.ABC):
                         ),
                         {
                             "oneof_index": len(nested_oneofs),
-                            "number": self.get_field_number(
+                            "number": get_unique_field_number(
                                 len(field_descriptors) + oneof_field_idx,
                                 oneof_field_def,
                             ),

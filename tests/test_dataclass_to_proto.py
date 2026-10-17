@@ -834,3 +834,55 @@ def test_dataclass_to_proto_invalid_field_number():
         FieldNumber(-1)
     with pytest.raises(ValueError):
         FieldNumber(0)
+
+
+def test_dataclass_to_proto_field_numbers_skip_later_explicit_numbers(temp_dpool):
+    """Fields without a FieldNumber must not take a number that a later field
+    names for itself, regardless of declaration order"""
+
+    @dataclass
+    class Foo:
+        bar: Annotated[bool, FieldNumber(1)]  # type: ignore
+        foo: str
+        baz: Annotated[bool, FieldNumber(2)]  # type: ignore
+
+    desc = dataclass_to_proto("foo.bar", Foo, descriptor_pool=temp_dpool, validate=True)
+    assert desc.fields_by_name["bar"].number == 1
+    assert desc.fields_by_name["baz"].number == 2
+    assert desc.fields_by_name["foo"].number == 3
+
+
+def test_dataclass_to_proto_oneof_numbers_skip_later_explicit_numbers(temp_dpool):
+    """A oneof without FieldNumbers must not take a number that a later field
+    names for itself"""
+
+    @dataclass
+    class Foo:
+        bar: Annotated[bool, FieldNumber(1)]  # type: ignore
+        foo: Union[bool, str]
+        baz: Annotated[bool, FieldNumber(2)]  # type: ignore
+
+    desc = dataclass_to_proto("foo.bar", Foo, descriptor_pool=temp_dpool, validate=True)
+    numbers = [f.number for f in desc.fields]
+    assert len(numbers) == len(set(numbers)) == 4
+    assert desc.fields_by_name["bar"].number == 1
+    assert desc.fields_by_name["baz"].number == 2
+
+
+def test_dataclass_to_proto_ordered_field_numbers_are_unchanged(temp_dpool):
+    """Messages that already numbered correctly keep the same numbers"""
+
+    @dataclass
+    class Foo:
+        bar: Annotated[bool, FieldNumber(1)]  # type: ignore
+        baz: Annotated[bool, FieldNumber(2)]  # type: ignore
+        foo: str
+        other: int
+
+    desc = dataclass_to_proto("foo.bar", Foo, descriptor_pool=temp_dpool, validate=True)
+    assert [(f.name, f.number) for f in desc.fields] == [
+        ("bar", 1),
+        ("baz", 2),
+        ("foo", 3),
+        ("other", 4),
+    ]
